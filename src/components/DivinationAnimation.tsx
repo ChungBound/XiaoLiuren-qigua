@@ -1,5 +1,6 @@
 
-import React, { useEffect, useState } from 'react';
+
+import React, { useEffect, useState, useRef } from 'react';
 import { Palace, PALACES } from '@/lib/xiaoliuren';
 import { TRANSLATIONS } from '@/lib/translations';
 
@@ -15,30 +16,33 @@ export default function DivinationAnimation({ path, onComplete, lang }: Props) {
   const [message, setMessage] = useState('');
   
   const t = TRANSLATIONS[lang];
+  const audioRef = useRef<HTMLAudioElement | null>(null);
 
   useEffect(() => {
-    // Animation Sequence
     const runAnimation = async () => {
-      // Step 1: Month/First
-      setMessage(`${t.ui.step1}...`);
-      await simulateCount(1, path[0]);
+      // Initial delay
+      await new Promise(r => setTimeout(r, 500));
+
+      // Step 1: Month (Start from Da An = 1)
+      setMessage(t.ui.step1);
       setStep(1);
+      await simulateCount(1, path[0]);
       
-      await new Promise(r => setTimeout(r, 800));
+      await new Promise(r => setTimeout(r, 600));
 
-      // Step 2: Day/Second
-      setMessage(`${t.ui.step2}...`);
-      await simulateCount(path[0], path[1]);
+      // Step 2: Day (Start from Month Result)
+      setMessage(t.ui.step2);
       setStep(2);
+      await simulateCount(path[0], path[1]);
+
+      await new Promise(r => setTimeout(r, 600));
+
+      // Step 3: Hour (Start from Day Result)
+      setMessage(t.ui.step3);
+      setStep(3);
+      await simulateCount(path[1], path[2]);
 
       await new Promise(r => setTimeout(r, 800));
-
-      // Step 3: Hour/Third
-      setMessage(`${t.ui.step3}...`);
-      await simulateCount(path[1], path[2]);
-      setStep(3);
-
-      await new Promise(r => setTimeout(r, 1000));
       onComplete();
     };
 
@@ -46,52 +50,58 @@ export default function DivinationAnimation({ path, onComplete, lang }: Props) {
   }, []);
 
   const simulateCount = async (start: number, end: number) => {
-    // Determine number of steps.
-    // In Xiao Liu Ren, we count clockwise.
-    // Distance = (End - Start + 6) % 6. If 0, it means 6 steps (or 0 if start==end, but usually we count at least 1).
-    // Actually, if start=1, end=1, we count 1.
-    // Let's just visualize the "landing" for now to save time, or do a quick cycle.
-    // Let's do a quick cycle visual.
-    
     let current = start;
-    const steps = (end - start + 6) % 6; 
-    // If steps is 0, it means we land on the same spot.
     
-    // Flash current
+    // Calculate total steps needed. 
+    // If start=1, end=3. Steps: 1->2->3. (2 steps movement, but we highlight 3 nodes)
+    // We want to highlight 'start' first, then move.
+    
+    // Highlight Start
     setActivePalace(current);
     await new Promise(r => setTimeout(r, 300));
 
-    // If we need to move
-    if (steps > 0 || start === end) {
-       // Simple visual: just jump to end for now to keep it snappy, 
-       // or iterate if we want "counting" feel.
-       // Let's iterate a bit.
-       let count = 0;
-       while (count < steps) {
-         current = (current % 6) + 1;
-         setActivePalace(current);
-         await new Promise(r => setTimeout(r, 200));
-         count++;
-       }
+    const distance = (end - start + 6) % 6;
+    // If distance is 0 (start == end), we just stay there.
+    // Otherwise we move 'distance' times.
+
+    for (let i = 0; i < distance; i++) {
+      // Move to next
+      current = (current % 6) + 1;
+      setActivePalace(current);
+      // Play tick sound if we had one
+      await new Promise(r => setTimeout(r, 200)); // Speed of counting
     }
+    
+    // Final highlight for this step
+    await new Promise(r => setTimeout(r, 200));
   };
 
   return (
     <div className="animation-container">
-      <h2 className="animate-pulse text-xl mb-4 text-primary">{t.ui.calculating}</h2>
-      <div className="text-sm text-gray-400 mb-8">{message}</div>
+      <h2 className="animate-pulse text-xl mb-4 text-primary font-serif">{t.ui.calculating}</h2>
+      <div className="text-sm text-gray-400 mb-8 h-6">{message}</div>
       
       <div className="palace-grid">
         {PALACES.map((p) => {
           const isActive = activePalace === p.id;
-          const isFinal = step === 3 && isActive;
+          // Determine if this node is a "final" result of a previous step
+          const isMonthResult = step >= 1 && p.id === path[0];
+          const isDayResult = step >= 2 && p.id === path[1];
+          const isHourResult = step >= 3 && p.id === path[2];
+          
+          // Current active node style
+          let className = `palace-node`;
+          if (isActive) className += ' active';
+          
+          // Persistent markers for completed steps
+          if (isMonthResult && step > 1) className += ' marker-month';
+          if (isDayResult && step > 2) className += ' marker-day';
           
           return (
-            <div 
-              key={p.id} 
-              className={`palace-node ${isActive ? 'active' : ''} ${isFinal ? 'final' : ''}`}
-            >
+            <div key={p.id} className={className}>
               <div className="palace-node-name">{lang === 'zh' ? p.cnName : p.name}</div>
+              {isMonthResult && step > 1 && <div className="marker-label">M</div>}
+              {isDayResult && step > 2 && <div className="marker-label">D</div>}
             </div>
           );
         })}
@@ -104,42 +114,85 @@ export default function DivinationAnimation({ path, onComplete, lang }: Props) {
           align-items: center;
           justify-content: center;
           padding: 2rem;
+          width: 100%;
         }
         .palace-grid {
           display: grid;
           grid-template-columns: repeat(3, 1fr);
-          gap: 1rem;
-          max-width: 300px;
+          gap: 1.5rem; /* Increased gap */
+          max-width: 350px;
+          position: relative;
         }
+        /* Connect the grid to look more like a hand/circle if desired, 
+           but grid is clearer for now. */
+           
         .palace-node {
           width: 80px;
           height: 80px;
-          border: 2px solid #334155;
           border-radius: 50%;
           display: flex;
           align-items: center;
           justify-content: center;
-          background: #1e293b;
-          transition: all 0.3s ease;
-          opacity: 0.5;
+          background: rgba(30, 41, 59, 0.6); /* Glassy */
+          border: 1px solid rgba(255, 255, 255, 0.1);
+          backdrop-filter: blur(4px);
+          transition: all 0.2s ease;
+          position: relative;
+          color: #94a3b8;
         }
+
         .palace-node.active {
-          border-color: #fbbf24;
-          background: rgba(251, 191, 36, 0.1);
-          opacity: 1;
-          transform: scale(1.1);
-          box-shadow: 0 0 15px rgba(251, 191, 36, 0.3);
+          border-color: var(--primary-color);
+          background: rgba(251, 191, 36, 0.2);
+          color: var(--primary-color);
+          transform: scale(1.15);
+          box-shadow: 0 0 20px rgba(251, 191, 36, 0.4);
+          z-index: 10;
         }
-        .palace-node.final {
-          border-color: #f472b6;
-          background: rgba(244, 114, 182, 0.2);
-          box-shadow: 0 0 25px rgba(244, 114, 182, 0.5);
+
+        .palace-node.marker-month {
+          border-color: var(--secondary-color);
+          color: var(--secondary-color);
         }
+        
+        .palace-node.marker-day {
+          border-color: var(--accent-color);
+          color: var(--accent-color);
+        }
+
+        .marker-label {
+          position: absolute;
+          top: -5px;
+          right: -5px;
+          font-size: 0.6rem;
+          width: 18px;
+          height: 18px;
+          background: #0f172a;
+          border: 1px solid currentColor;
+          border-radius: 50%;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          color: inherit;
+        }
+
         .palace-node-name {
-          font-size: 0.8rem;
+          font-size: 0.9rem;
+          font-weight: 500;
           text-align: center;
+        }
+        
+        @media (max-width: 480px) {
+          .palace-grid {
+             gap: 1rem;
+          }
+          .palace-node {
+            width: 70px;
+            height: 70px;
+          }
         }
       `}</style>
     </div>
   );
 }
+
